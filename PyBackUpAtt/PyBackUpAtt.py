@@ -26,6 +26,7 @@ def provideCredentials():
             grp = data["GroupName"]
             entr = data["EntryName"]
             creds["Domain"] = data ["Domain"]
+            creds["SalesForceObject"] = data["SalesForceObject"]
     except OSError:
         errs['config_file'] = 'Error opening configuration file'
         return dict, errs

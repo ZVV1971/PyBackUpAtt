@@ -1,7 +1,7 @@
 {
-  "KDBXPath": "c:\\Users\\Uladzimir_Zakharenka\\source\\repos\\ZVV1971\\sfidsmultiuser\\LINX_GERMANY.kdbx",
-  "GroupName": "EPAM",
-  "EntryName": "EPAM",
   "Domain": "login",
+  "EntryName": "EPAM",
+  "GroupName": "EPAM",
+  "KDBXPath": "c:\\Users\\Uladzimir_Zakharenka\\source\\repos\\ZVV1971\\sfidsmultiuser\\LINX_GERMANY.kdbx",
   "SalesForceObject": "Document"
 }
