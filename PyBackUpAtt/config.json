@@ -3,5 +3,6 @@
   "EntryName": "EPAM",
   "GroupName": "EPAM",
   "KDBXPath": "c:\\Users\\Uladzimir_Zakharenka\\source\\repos\\ZVV1971\\sfidsmultiuser\\LINX_GERMANY.kdbx",
-  "SalesForceObject": "Document"
+  "SalesForceObject": "Document",
+  "WorkMode": "Read"
 }

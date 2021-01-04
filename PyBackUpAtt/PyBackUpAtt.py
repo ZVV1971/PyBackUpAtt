@@ -27,6 +27,7 @@ def provideCredentials():
             entr = data["EntryName"]
             creds["Domain"] = data ["Domain"]
             creds["SalesForceObject"] = data["SalesForceObject"]
+            creds["WorkMode"] = data["WorkMode"]
     except OSError:
         errs['config_file'] = 'Error opening configuration file'
         return dict, errs
@@ -82,13 +83,32 @@ def main():
     # manipulate the session instance (optional)
     sf = Salesforce(username=creds['UserName'], password=creds['Password'], security_token=creds['SecurityToken'], domain=creds['Domain'])
 
-    att = sf.query("SELECT Id FROM Document")
+    data = sf.query_all("SELECT Id FROM {0}".format(creds['SalesForceObject']))
     q = Queue()
 
-    for a in att['records']:
+    for a in data['records']:
         q.put(a['Id'])
+
+    for i in range(1,3):
+        func = get_worker(creds['WorkMode'])
+        Thread(target=func(q, sf, creds), daemon=True).start()
+    q.join()
+
 
     print()
 
+def get_worker(workmode):
+    switcher={
+        'Read':read_worker
+        }
+    return switcher.get(workmode, lambda *args:None)
+
+def read_worker(q, sf, creds):
+    while True:
+            item = q.get()
+            ##res = sf.query("SELECT Body FROM {0} WHERE id ='{1}'".format(creds['SalesForceObject'], item))
+            res = sf.restful('{0}sobjects/{1}/{2}/Body'.format(sf.base_url, creds['SalesForceObject'], item))
+            print('Got {0} from SalesForce'.format(item))
+            
 if __name__ == "__main__":
     main()
