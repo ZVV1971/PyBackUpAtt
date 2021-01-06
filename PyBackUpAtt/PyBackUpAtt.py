@@ -9,6 +9,8 @@ import threading
 from queue import Queue
 import requests
 from datetime import datetime
+from Cryptodome.Cipher import AES
+from Cryptodome.Protocol.KDF import PBKDF2
 
 def provideCredentials():
 
@@ -84,8 +86,13 @@ def read_worker():
             print('Got {0} from SalesForce; {1} bytes at {2} from {3}'.format(item, len(res.content), datetime.now(), threading.currentThread().getName()))
             q.task_done()
 
+def prepare_crypto_stuf(creds):
+    kdf = PBKDF2(creds['AESPassword'], creds['Salt'])
+
 creds, errs = provideCredentials()
 q = Queue()
+
+prepare_crypto_stuf(creds)
 
 # manipulate the session instance (optional)
 sf = Salesforce(username=creds['UserName'], password=creds['Password'], security_token=creds['SecurityToken'], domain=creds['Domain'])
