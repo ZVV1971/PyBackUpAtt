@@ -1,4 +1,3 @@
-
 from pykeepass import PyKeePass
 import sys
 import msvcrt
@@ -6,8 +5,10 @@ import json
 from simple_salesforce import Salesforce
 import requests
 from html import escape
-from threading import Thread
+import threading
 from queue import Queue
+import requests
+from datetime import datetime
 
 def provideCredentials():
 
@@ -28,6 +29,7 @@ def provideCredentials():
             creds["Domain"] = data ["Domain"]
             creds["SalesForceObject"] = data["SalesForceObject"]
             creds["WorkMode"] = data["WorkMode"]
+            creds["NumberOfThreads"] = data["NumberOfThreads"]
     except OSError:
         errs['config_file'] = 'Error opening configuration file'
         return dict, errs
@@ -68,47 +70,47 @@ def provideCredentials():
                         return creds, errs
     return creds, errs
 
-def main():
-    creds, errs = provideCredentials()
-    if len(errs) != 0:
-        for k in errs:
-            print(errs[k])
-        print('Exiting... Press any key...')
-        msvcrt.getch()
-        sys.exit()
-
-    #for k in creds:
-        #print(creds[k])
-
-    # manipulate the session instance (optional)
-    sf = Salesforce(username=creds['UserName'], password=creds['Password'], security_token=creds['SecurityToken'], domain=creds['Domain'])
-
-    data = sf.query_all("SELECT Id FROM {0}".format(creds['SalesForceObject']))
-    q = Queue()
-
-    for a in data['records']:
-        q.put(a['Id'])
-
-    for i in range(1,3):
-        func = get_worker(creds['WorkMode'])
-        Thread(target=func(q, sf, creds), daemon=True).start()
-    q.join()
-
-
-    print()
-
 def get_worker(workmode):
     switcher={
         'Read':read_worker
         }
     return switcher.get(workmode, lambda *args:None)
 
-def read_worker(q, sf, creds):
+def read_worker():
     while True:
             item = q.get()
-            ##res = sf.query("SELECT Body FROM {0} WHERE id ='{1}'".format(creds['SalesForceObject'], item))
-            res = sf.restful('{0}sobjects/{1}/{2}/Body'.format(sf.base_url, creds['SalesForceObject'], item))
-            print('Got {0} from SalesForce'.format(item))
-            
+            ## Have to use direct request since simple-salesforce restful functionallity fails to get binary content
+            res = requests.get('{0}sobjects/{1}/{2}/Body'.format(sf.base_url, creds['SalesForceObject'], item), headers={'Authorization':'Bearer {0}'.format(sf.session_id)})
+            print('Got {0} from SalesForce; {1} bytes at {2} from {3}'.format(item, len(res.content), datetime.now(), threading.currentThread().getName()))
+            q.task_done()
+
+creds, errs = provideCredentials()
+q = Queue()
+
+# manipulate the session instance (optional)
+sf = Salesforce(username=creds['UserName'], password=creds['Password'], security_token=creds['SecurityToken'], domain=creds['Domain'])
+
+def main():
+    if len(errs) != 0:
+        for k in errs:
+            print(errs[k])
+        print('Exiting... Press any key...')
+        msvcrt.getch()
+        sys.exit()
+    
+    data = sf.query_all("SELECT Id FROM {0}".format(creds['SalesForceObject']))
+
+    for a in data["records"]:
+        q.put(a["Id"])
+
+    for i in range(creds["NumberOfThreads"]):
+        func = get_worker(creds['WorkMode'])
+        t = threading.Thread(target=func, daemon=True)
+        t.start()
+        print("Thread {0} has been started".format(t.getName()))
+
+    q.join()
+    print()
+
 if __name__ == "__main__":
     main()
