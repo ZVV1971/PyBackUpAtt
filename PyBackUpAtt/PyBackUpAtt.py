@@ -1,9 +1,10 @@
 from pykeepass import PyKeePass
+from pykeepass.exceptions import *
 import sys
+import os
 import msvcrt
 import json
 from simple_salesforce import Salesforce
-import requests
 from html import escape
 import threading
 from queue import Queue
@@ -11,6 +12,9 @@ import requests
 from datetime import datetime
 from Cryptodome.Cipher import AES
 from Cryptodome.Protocol.KDF import PBKDF2
+from base64 import b64decode
+from base64 import b64encode
+from Cryptodome.Util.Padding import pad, unpad
 
 def provideCredentials():
 
@@ -55,7 +59,12 @@ def provideCredentials():
         passw +=x.decode('utf-8')
 
     # load database and find entry
-    kp = PyKeePass(kdbxpath, password=passw)
+    try:
+        kp = PyKeePass(kdbxpath, password=passw)
+    except CredentialsError as cer:
+        print("Incorrect credentials {0}".format(cer))
+        exit(-2)
+
     for gr in kp.groups:
         if gr.name == grp:
             for en in gr.entries:
@@ -82,12 +91,16 @@ def read_worker():
     while True:
             item = q.get()
             ## Have to use direct request since simple-salesforce restful functionallity fails to get binary content
-            res = requests.get('{0}sobjects/{1}/{2}/Body'.format(sf.base_url, creds['SalesForceObject'], item), headers={'Authorization':'Bearer {0}'.format(sf.session_id)})
+            res = requests.get('{0}sobjects/{1}/{2}/Body'.format(sf.base_url, creds['SalesForceObject'], item), 
+                               headers={'Authorization':'Bearer {0}'.format(sf.session_id)})
             print('Got {0} from SalesForce; {1} bytes at {2} from {3}'.format(item, len(res.content), datetime.now(), threading.currentThread().getName()))
+            
+            creds['ResultsFile'].write('{0},{1}'.format(item, b64encode(creds['Cipher'].encrypt(pad(res.content, AES.block_size))).decode('utf-8')))
             q.task_done()
 
 def prepare_crypto_stuf(creds):
     kdf = PBKDF2(creds['AESPassword'], creds['Salt'])
+    creds['Cipher'] = AES.new(kdf, AES.MODE_CBC, b64decode(creds['IV']))
 
 creds, errs = provideCredentials()
 q = Queue()
@@ -110,14 +123,31 @@ def main():
     for a in data["records"]:
         q.put(a["Id"])
 
-    for i in range(creds["NumberOfThreads"]):
-        func = get_worker(creds['WorkMode'])
-        t = threading.Thread(target=func, daemon=True)
-        t.start()
-        print("Thread {0} has been started".format(t.getName()))
-
-    q.join()
+    with open("results.dat",'a', 1) as f:
+        creds['ResultsFile'] = f
+        for i in range(creds["NumberOfThreads"]):
+            func = get_worker(creds['WorkMode'])
+            t = threading.Thread(target=func, daemon=True)
+            t.start()
+            print("Thread {0} has been started".format(t.getName()))
+        #wait till all rows are processed then close the result file
+        q.join()
     print()
 
 if __name__ == "__main__":
     main()
+
+class AESCipher:
+    def __init__(self, key):
+        self.key = md5(key.encode('utf8')).digest()
+
+    def encrypt(self, data):
+        iv = get_random_bytes(AES.block_size)
+        self.cipher = AES.new(self.key, AES.MODE_CBC, iv)
+        return b64encode(iv + self.cipher.encrypt(pad(data.encode('utf-8'), 
+            AES.block_size)))
+
+    def decrypt(self, data):
+        raw = b64decode(data)
+        self.cipher = AES.new(self.key, AES.MODE_CBC, raw[:AES.block_size])
+        return unpad(self.cipher.decrypt(raw[AES.block_size:]), AES.block_size)

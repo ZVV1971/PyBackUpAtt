@@ -260,5 +260,5 @@ paket-files/
 __pycache__/
 *.pyc
 /q.py
-/PyBackUpAtt/env/Scripts
+/PyBackUpAtt/env*
 /PyBackUpAtt/env/Lib/site-packages
