@@ -36,6 +36,7 @@ def provideCredentials():
             creds["SalesForceObject"] = data["SalesForceObject"]
             creds["WorkMode"] = data["WorkMode"]
             creds["NumberOfThreads"] = data["NumberOfThreads"]
+            creds["ResultsFileName"] = data["ResultsFileName"]
     except OSError:
         errs['config_file'] = 'Error opening configuration file'
         return dict, errs
@@ -83,20 +84,25 @@ def provideCredentials():
 
 def get_worker(workmode):
     switcher={
-        'Read':read_worker
+        'Read':read_worker,
+        'Compare':compare_worker
         }
     return switcher.get(workmode, lambda *args:None)
 
 def read_worker():
     while True:
-            item = q.get()
-            ## Have to use direct request since simple-salesforce restful functionallity fails to get binary content
-            res = requests.get('{0}sobjects/{1}/{2}/Body'.format(sf.base_url, creds['SalesForceObject'], item), 
+        item = q.get()
+        ## Have to use direct request since simple-salesforce restful functionallity fails to get binary content
+        res = requests.get('{0}sobjects/{1}/{2}/Body'.format(sf.base_url, creds['SalesForceObject'], item), 
                                headers={'Authorization':'Bearer {0}'.format(sf.session_id)})
-            print('Got {0} from SalesForce; {1} bytes at {2} from {3}'.format(item, len(res.content), datetime.now(), threading.currentThread().getName()))
+        print('Got {0} from SalesForce; {1} bytes at {2} from {3}'.format(item, len(res.content), datetime.now(), threading.currentThread().getName()))
             
-            creds['ResultsFile'].write('{0},{1}'.format(item, b64encode(creds['Cipher'].encrypt(pad(res.content, AES.block_size))).decode('utf-8')))
-            q.task_done()
+        creds['ResultsFile'].write('{0},{1}{2}'.format(item, b64encode(creds['Cipher'].encrypt(pad(res.content, AES.block_size))).decode('utf-8'),'\r'))
+        q.task_done()
+
+def compare_worker():
+    while True:
+        pass
 
 def prepare_crypto_stuf(creds):
     kdf = PBKDF2(creds['AESPassword'], creds['Salt'])
@@ -123,7 +129,7 @@ def main():
     for a in data["records"]:
         q.put(a["Id"])
 
-    with open("results.dat",'a', 1) as f:
+    with open(creds["ResultsFileName"],'a', 1) as f:
         creds['ResultsFile'] = f
         for i in range(creds["NumberOfThreads"]):
             func = get_worker(creds['WorkMode'])
