@@ -16,8 +16,10 @@ from base64 import b64decode
 from base64 import b64encode
 from Cryptodome.Util.Padding import pad, unpad
 
-def provideCredentials():
+creds=[]
 
+def provideCredentials():
+    global creds
     kdbxpath=''
     grp=''
     entr=''
@@ -37,6 +39,7 @@ def provideCredentials():
             creds["WorkMode"] = data["WorkMode"]
             creds["NumberOfThreads"] = data["NumberOfThreads"]
             creds["ResultsFileName"] = data["ResultsFileName"]
+            creds["ComparisonResultsFileName"] = data["ComparisonResultsFileName"]
     except OSError:
         errs['config_file'] = 'Error opening configuration file'
         return dict, errs
@@ -57,7 +60,7 @@ def provideCredentials():
             passw = passw[:-1]
             continue
         msvcrt.putch(b'*')
-        passw +=x.decode('utf-8')
+        passw +=x.decode('cp866')
 
     # load database and find entry
     try:
@@ -89,34 +92,57 @@ def get_worker(workmode):
         }
     return switcher.get(workmode, lambda *args:None)
 
+def get_preparator(workmode):
+    switcher={
+        'Read':prepare_reader,
+        'Compare':prepare_comparator
+        }
+    return switcher.get(workmode, lambda *args:None)
+
 def read_worker():
+    global creds
     while True:
-        item = q.get()
+        item = creds["working_queue"].get()
         ## Have to use direct request since simple-salesforce restful functionallity fails to get binary content
-        res = requests.get('{0}sobjects/{1}/{2}/Body'.format(sf.base_url, creds['SalesForceObject'], item), 
-                               headers={'Authorization':'Bearer {0}'.format(sf.session_id)})
+        res = requests.get('{0}sobjects/{1}/{2}/Body'.format(creds["SFSession"].base_url, creds['SalesForceObject'], item), 
+                               headers={'Authorization':'Bearer {0}'.format(creds["SFSession"].session_id)})
         print('Got {0} from SalesForce; {1} bytes at {2} from {3}'.format(item, len(res.content), datetime.now(), threading.currentThread().getName()))
             
         creds['ResultsFile'].write('{0},{1}{2}'.format(item, b64encode(creds['Cipher'].encrypt(pad(res.content, AES.block_size))).decode('utf-8'),'\r'))
-        q.task_done()
+        creds["working_queue"].task_done()
 
 def compare_worker():
+    global creds
     while True:
-        pass
+        item = creds["working_queue"].get()
+        id, body = item.split(',')
+        ## Have to use direct request since simple-salesforce restful functionallity fails to get binary content
+        res = requests.get('{0}sobjects/{1}/{2}/Body'.format(creds["SFSession"].base_url, creds['SalesForceObject'], id), 
+                               headers={'Authorization':'Bearer {0}'.format(creds["SFSession"].session_id)})
+        print('Got {0} from SalesForce; {1} bytes at {2} from {3}'.format(item, len(res.content), datetime.now(), threading.currentThread().getName()))
+            
+        creds['ComparisonResultsFile'].write('{0},{1}{2}'.format(item, b64encode(creds['Cipher'].encrypt(pad(res.content, AES.block_size))).decode('utf-8') == body,'\r'))
+        creds["working_queue"].task_done()
+        
 
 def prepare_crypto_stuf(creds):
     kdf = PBKDF2(creds['AESPassword'], creds['Salt'])
     creds['Cipher'] = AES.new(kdf, AES.MODE_CBC, b64decode(creds['IV']))
 
-creds, errs = provideCredentials()
-q = Queue()
+def prepare_reader():
+    global creds
+    data = creds["SFSession"].query_all("SELECT Id FROM {0}".format(creds['SalesForceObject']))
+    for a in data["records"]:
+        creds["working_queue"].put_nowait(a["Id"])
 
-prepare_crypto_stuf(creds)
-
-# manipulate the session instance (optional)
-sf = Salesforce(username=creds['UserName'], password=creds['Password'], security_token=creds['SecurityToken'], domain=creds['Domain'])
+def prepare_comparator():
+    global creds
+    pass
 
 def main():
+    global creds
+    creds, errs = provideCredentials()
+
     if len(errs) != 0:
         for k in errs:
             print(errs[k])
@@ -124,20 +150,25 @@ def main():
         msvcrt.getch()
         sys.exit()
     
-    data = sf.query_all("SELECT Id FROM {0}".format(creds['SalesForceObject']))
+    
+    creds["working_queue"] = Queue()
 
-    for a in data["records"]:
-        q.put(a["Id"])
+    prepare_crypto_stuf(creds)
 
-    with open(creds["ResultsFileName"],'a', 1) as f:
+    creds["SFSession"] = Salesforce(username=creds['UserName'], password=creds['Password'], security_token=creds['SecurityToken'], domain=creds['Domain'])
+    
+    get_preparator(creds["WorkMode"])()
+
+    with open(creds["ResultsFileName"],"a+", 1) as f, open(creds["ComparisonResultsFileName"],"a+",1) as c:
         creds['ResultsFile'] = f
+        creds['ComparisonResultsFile'] = c
         for i in range(creds["NumberOfThreads"]):
             func = get_worker(creds['WorkMode'])
             t = threading.Thread(target=func, daemon=True)
             t.start()
             print("Thread {0} has been started".format(t.getName()))
         #wait till all rows are processed then close the result file
-        q.join()
+        creds["working_queue"].join()
     print()
 
 if __name__ == "__main__":

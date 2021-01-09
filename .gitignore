@@ -263,3 +263,4 @@ __pycache__/
 /PyBackUpAtt/env*
 /PyBackUpAtt/env/Lib/site-packages
 /PyBackUpAtt/EncryptedResults.dat
+/PyBackUpAtt/ComparisonResults.dat
